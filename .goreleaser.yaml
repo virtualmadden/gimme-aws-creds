@@ -35,7 +35,7 @@ checksum:
   name_template: "{{ .ProjectName }}_{{ .Version }}_checksums.txt"
 
 snapshot:
-  name_template: "{{ incpatch .Version }}-next"
+  version_template: "{{ incpatch .Version }}-next"
 
 changelog:
   sort: asc
@@ -44,16 +44,5 @@ changelog:
       - "^docs:"
       - "^test:"
 
-brews:
-  - name: gimme-aws-creds
-    repository:
-      owner: virtualmadden
-      name: homebrew-tap
-    directory: Formula
-    homepage: https://github.com/virtualmadden/gimme-aws-creds
-    description: Acquire temporary AWS credentials via AWS SSO
-    license: Apache-2.0
-    install: |
-      bin.install "gimme-aws-creds"
-    test: |
-      system "#{bin}/gimme-aws-creds", "version"
+# Homebrew cask publishing disabled until virtualmadden/homebrew-tap exists.
+# See https://goreleaser.com/customization/homebrew_casks/
