@@ -1,6 +1,6 @@
 # gimme-aws-creds
 
-![PR Test](https://github.com/virtualmadden/gimme-aws-creds/actions/workflows/pr-test.yml/badge.svg)
+![PR Test](https://github.com/virtualmadden/gimme-aws-creds/actions/workflows/on-pr.yml/badge.svg)
 
 A Go CLI that uses **AWS IAM Identity Center (SSO)** to acquire short-lived AWS credentials and write them to `~/.aws/credentials` or export them to your shell.
 
@@ -63,6 +63,17 @@ make build
 ### Pre-built releases
 
 Download the latest binary from [GitHub Releases](https://github.com/virtualmadden/gimme-aws-creds/releases).
+
+### Publishing a release
+
+Releases are published when a `v*` tag is pushed to `main`. After merging changes:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+The [on-publish](.github/workflows/on-publish.yml) workflow runs Goreleaser to build cross-platform binaries and create the GitHub Release.
 
 ## Configuration
 
