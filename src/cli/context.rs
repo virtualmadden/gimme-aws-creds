@@ -78,11 +78,22 @@ impl Context {
         fsx::write_atomic(path, updated.as_bytes(), ModePolicy::Keep)
     }
 
-    /// The session's accounts and roles: from the inventory cache while it is fresh, otherwise
-    /// (or with `refresh`) from the portal, which may refresh the SSO token first.
+    /// The session's accounts and roles: from the inventory cache while it is fresh and was made
+    /// with the current token's lineage, otherwise (or with `refresh`) from the portal. Either way
+    /// a usable SSO token is required, which may be refreshed first.
     pub async fn accounts(&self, session: &Session, refresh: bool) -> Result<Snapshot<Account>> {
-        let inventory = self.inventory(session);
-        let scope = format!("{} {}", session.start_url, session.region);
+        let token = auth::usable_token(&self.token_store(), session).await?;
+        let inventory = Inventory::new(
+            &self.paths.state_dir().join("inventory"),
+            session.cache_key(),
+            INVENTORY_TTL,
+        );
+        let scope = format!(
+            "{} {} {}",
+            session.start_url,
+            session.region,
+            token.lineage()
+        );
         let now = Timestamp::now();
         if !refresh
             && let Some(snapshot) = inventory
@@ -92,22 +103,11 @@ impl Context {
             tracing::debug!(fetched_at = %snapshot.fetched_at, "using the inventory cache");
             return Ok(snapshot);
         }
-        let token = auth::access_token(&self.token_store(), session).await?;
         let accounts = Portal::new(session)
             .await
-            .accounts_with_roles(&token)
+            .accounts_with_roles(&token.access_token)
             .await?;
         inventory.store(&scope, accounts, Timestamp::now())
-    }
-
-    /// The session's inventory cache. A login or logout clears it, so a listing made for one
-    /// identity is never served to the next.
-    pub fn inventory(&self, session: &Session) -> Inventory {
-        Inventory::new(
-            &self.paths.state_dir().join("inventory"),
-            session.cache_key(),
-            INVENTORY_TTL,
-        )
     }
 
     /// The session a command acts on: `--session`, else the session of `--profile`, else the

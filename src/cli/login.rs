@@ -52,7 +52,6 @@ pub async fn run(ctx: &Context, args: LoginArgs) -> Result<()> {
         &options,
     )
     .await?;
-    ctx.inventory(&session).clear()?;
     let refresh = if token.is_refreshable(Timestamp::now()) {
         "; it refreshes automatically"
     } else {

@@ -17,7 +17,7 @@ use crate::aws_files::{LegacySsoProfile, SsoSessionConfig};
 use crate::domain::{Region, SessionName, StartUrl};
 use crate::error::{Error, Result};
 use crate::portal::Portal;
-use crate::secret::{self, SecretString};
+use crate::secret;
 use oidc::{ClientCredentials, Oidc, TokenGrant};
 use registration::Grant;
 use token::{CachedToken, TokenState, TokenStore};
@@ -176,11 +176,11 @@ fn expiry(now: Timestamp, expires_in: jiff::SignedDuration) -> Result<Timestamp>
     })
 }
 
-/// A usable access token, refreshed first when less than 15 minutes remain.
+/// A usable token, refreshed first when less than 15 minutes remain.
 ///
 /// The refresh takes the sidecar lock and re-reads the cache, so parallel gac processes refresh
 /// once, and a token another process (or the AWS CLI) already rotated is used as it is.
-pub async fn access_token(store: &impl TokenStore, session: &Session) -> Result<SecretString> {
+pub async fn usable_token(store: &impl TokenStore, session: &Session) -> Result<CachedToken> {
     let key = session.cache_key();
     let token = load_token(store, session)?;
     let now = Timestamp::now();
@@ -198,7 +198,7 @@ pub async fn access_token(store: &impl TokenStore, session: &Session) -> Result<
         Ok(refreshed) => {
             store.save(key, &refreshed)?;
             tracing::debug!(expires_at = %refreshed.expires_at, "refreshed the SSO token");
-            Ok(refreshed.access_token)
+            Ok(refreshed)
         }
         Err(err) => {
             tracing::warn!("could not refresh the SSO token: {err}");
@@ -213,12 +213,12 @@ fn load_token(store: &impl TokenStore, session: &Session) -> Result<CachedToken>
         .ok_or_else(|| session.login_required("no cached SSO token"))
 }
 
-fn usable(token: CachedToken, session: &Session, now: Timestamp) -> Result<SecretString> {
+fn usable(token: CachedToken, session: &Session, now: Timestamp) -> Result<CachedToken> {
     if token.state(now) == TokenState::Expired {
         Err(session.login_required(format!("the SSO token expired at {}", token.expires_at)))
     } else {
         tracing::debug!(token = %secret::shape(&token.access_token), expires_at = %token.expires_at, "using the cached SSO token");
-        Ok(token.access_token)
+        Ok(token)
     }
 }
 

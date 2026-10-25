@@ -89,11 +89,6 @@ impl Inventory {
         Ok(snapshot)
     }
 
-    /// Deletes the stored snapshot, if any.
-    pub fn clear(&self) -> Result<()> {
-        fsx::remove_if_exists(&self.path).map(drop)
-    }
-
     #[cfg(test)]
     pub fn path(&self) -> &Path {
         &self.path
@@ -133,9 +128,5 @@ mod tests {
 
         std::fs::write(inventory.path(), "not json").unwrap();
         assert!(inventory.load::<String>("scope-a").is_none());
-
-        inventory.clear().unwrap();
-        assert!(!inventory.path().exists());
-        inventory.clear().unwrap();
     }
 }

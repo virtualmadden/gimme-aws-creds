@@ -332,7 +332,7 @@ fn list_uses_the_inventory_cache() {
 }
 
 #[test]
-fn a_login_or_logout_drops_the_previous_identitys_listing() {
+fn the_inventory_cache_is_bound_to_the_token_that_listed_it() {
     let listed_ids = |sandbox: &Sandbox| -> Vec<String> {
         let json = sandbox.gac().args(["list", "--json"]).assert().success();
         let json: Value = serde_json::from_slice(&json.get_output().stdout).unwrap();
@@ -345,26 +345,36 @@ fn a_login_or_logout_drops_the_previous_identitys_listing() {
     };
     let sandbox = Sandbox::with_session();
     login_device(&sandbox);
+    let first = sandbox.token("corp");
     assert_eq!(listed_ids(&sandbox).len(), 3);
+    assert_eq!(listed_ids(&sandbox).len(), 3);
+    assert_eq!(sandbox.mock.counter("accounts"), 1, "served from the cache");
 
-    // Another identity on the same portal, after a logout.
-    sandbox.gac().arg("logout").assert().success();
+    // Another identity signs in on the same portal, and another tool (the AWS CLI) replaces the
+    // shared token: the listing made with the first token is not reused.
     sandbox.mock.set_accounts(vec![account(
         "444455556666",
         "Shared Services",
         &["ReadOnly"],
     )]);
     login_device(&sandbox);
+    let second = sandbox.token("corp");
+    sandbox.write_token("corp", &first);
+    assert_eq!(listed_ids(&sandbox).len(), 3, "still the first token");
+    sandbox.write_token("corp", &second);
     assert_eq!(listed_ids(&sandbox), ["444455556666"]);
     assert_eq!(sandbox.mock.counter("accounts"), 2);
 
-    // And again by logging in over the old token, without a logout.
+    // Logged out (the token is gone, as after `aws sso logout` too): no listing is served.
+    sandbox.gac().arg("logout").assert().success();
     sandbox
-        .mock
-        .set_accounts(vec![account("777788889999", "sandbox", &["ReadOnly"])]);
-    login_device(&sandbox);
-    assert_eq!(listed_ids(&sandbox), ["777788889999"]);
-    assert_eq!(sandbox.mock.counter("accounts"), 3);
+        .gac()
+        .arg("list")
+        .assert()
+        .code(3)
+        .stderr(predicate::str::contains("gac login --session corp"));
+    sandbox.gac().arg("sync").assert().code(3);
+    assert_eq!(sandbox.mock.counter("accounts"), 2);
 }
 
 #[test]

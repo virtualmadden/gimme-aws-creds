@@ -11,11 +11,12 @@ use std::time::Duration;
 use jiff::{SignedDuration, Timestamp};
 use serde::{Deserialize, Serialize};
 use sha1::{Digest, Sha1};
+use sha2::Sha256;
 
 use crate::auth::botocore_json::{self, timestamp};
 use crate::error::{Error, Result};
 use crate::fsx::{self, FileLock, ModePolicy};
-use crate::secret::{self, SecretString};
+use crate::secret::{self, ExposeSecret, SecretString};
 
 /// Refresh once less than this remains, matching the AWS CLI (aws-config uses 5 minutes).
 pub const REFRESH_WINDOW: SignedDuration = SignedDuration::from_mins(15);
@@ -79,6 +80,13 @@ impl CachedToken {
         } else {
             TokenState::Valid
         }
+    }
+
+    /// A one-way hash that changes whenever another sign-in replaces the token: of the refresh
+    /// token, or of the access token when there is none. Safe to store; it reveals no secret.
+    pub fn lineage(&self) -> String {
+        let secret = self.refresh_token.as_ref().unwrap_or(&self.access_token);
+        hex::encode(Sha256::digest(secret.expose_secret().as_bytes()))
     }
 
     /// Whether a refresh can be attempted: the same test botocore applies.
@@ -176,7 +184,6 @@ impl TokenStore for SsoCache {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::secret::ExposeSecret;
 
     fn ts(s: &str) -> Timestamp {
         s.parse().unwrap()
@@ -222,6 +229,25 @@ mod tests {
         assert_eq!(parsed.access_token.expose_secret(), "a");
         assert_eq!(parsed.expires_at, ts("2026-10-25T06:01:13.210505Z"));
         assert!(!parsed.is_refreshable(ts("2026-10-25T00:00:00Z")));
+    }
+
+    #[test]
+    fn lineage_follows_the_refresh_token_and_hides_it() {
+        let t = token("2026-10-25T12:00:00Z");
+        let mut refreshed = t.clone();
+        refreshed.access_token = "access-2".into();
+        assert_eq!(t.lineage(), refreshed.lineage(), "a new access token alone");
+        refreshed.refresh_token = Some("refresh-2".into());
+        assert_ne!(t.lineage(), refreshed.lineage());
+        assert!(!t.lineage().contains("refresh"));
+
+        let legacy = CachedToken {
+            refresh_token: None,
+            ..t.clone()
+        };
+        let mut relogged = legacy.clone();
+        relogged.access_token = "access-2".into();
+        assert_ne!(legacy.lineage(), relogged.lineage());
     }
 
     #[test]
