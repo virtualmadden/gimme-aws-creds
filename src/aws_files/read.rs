@@ -6,6 +6,7 @@ use aws_config::profile::{Profile, ProfileSet};
 use aws_runtime::env_config::file::{EnvConfigFileKind, EnvConfigFiles};
 use aws_types::os_shim_internal::{Env, Fs};
 
+use crate::aws_files::managed_block;
 use crate::aws_files::paths::AwsPaths;
 use crate::domain::{Region, SessionName, StartUrl, parse_scopes};
 use crate::error::{Error, Result};
@@ -77,7 +78,7 @@ impl AwsFiles {
     pub fn sso_session(&self, name: &SessionName) -> Result<SsoSessionConfig> {
         let section = self.config.sso_session(name.as_str()).ok_or_else(|| {
             Error::config(format!("no [sso-session {name}] in the AWS config file"))
-                .with_hint(format!("run `gac setup --session {name}`"))
+                .with_hint(missing_session_hint(&self.config_text, name.as_str()))
         })?;
         let required = |key: &str| {
             section.get(key).filter(|v| !v.is_empty()).ok_or_else(|| {
@@ -161,6 +162,20 @@ async fn parse_one(
     aws_config::profile::load(&Fs::from_slice(&[]), &Env::from_slice(&[]), &files, None).await
 }
 
+/// How to recover from a missing `[sso-session NAME]`. `gac setup` refuses to recreate a session
+/// whose gac block survived, so the block has to go first.
+pub fn missing_session_hint(config_text: &str, session: &str) -> String {
+    let orphaned = managed_block::scan(config_text)
+        .is_ok_and(|blocks| blocks.iter().any(|b| b.header.session == session));
+    if orphaned {
+        format!(
+            "delete the gac block for session `{session}` by hand, then run `gac setup --session {session}`"
+        )
+    } else {
+        format!("run `gac setup --session {session}`")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -218,6 +233,14 @@ sso_region = us-east-1
         assert!(err.to_string().contains("no sso_start_url"), "{err}");
         let err = files.sso_session(&"missing".parse().unwrap()).unwrap_err();
         assert_eq!(err.hint().unwrap(), "run `gac setup --session missing`");
+        let orphaned =
+            format!("{CONFIG}\n# BEGIN gac sync session=missing\n# END gac sync session=missing\n");
+        let files = AwsFiles::parse(orphaned, "").await.unwrap();
+        let err = files.sso_session(&"missing".parse().unwrap()).unwrap_err();
+        assert_eq!(
+            err.hint().unwrap(),
+            "delete the gac block for session `missing` by hand, then run `gac setup --session missing`"
+        );
     }
 
     #[tokio::test]

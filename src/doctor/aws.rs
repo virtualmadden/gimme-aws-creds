@@ -6,6 +6,7 @@ use std::path::Path;
 use jiff::Timestamp;
 
 use crate::auth::token::{SsoCache, TokenState, TokenStore};
+use crate::aws_files::read::missing_session_hint;
 use crate::aws_files::{AwsFiles, AwsPaths, guards, managed_block};
 use crate::doctor::Report;
 use crate::fsx;
@@ -257,7 +258,7 @@ fn check_blocks(report: &mut Report, files: &AwsFiles) {
                     report.warn(
                         "managed-blocks",
                         format!("the gac block for session `{}` has no [sso-session] section, so its profiles cannot resolve", block.header.session),
-                        format!("run `gac setup --session {}`, or delete the block", block.header.session),
+                        missing_session_hint(files.config_text(), &block.header.session),
                     );
                 }
             }

@@ -746,6 +746,47 @@ fn doctor_flags_problems_with_fixes() {
 }
 
 #[test]
+fn the_fix_for_an_orphaned_block_is_one_setup_accepts() {
+    let sandbox = Sandbox::new();
+    let block = "# BEGIN gac sync session=corp mode=sso\n[profile dev]\nsso_session = corp\n# END gac sync session=corp\n";
+    sandbox.write_config(&format!("[default]\nregion = eu-west-1\n\n{block}"));
+    let hint =
+        "delete the gac block for session `corp` by hand, then run `gac setup --session corp`";
+
+    let doctor = sandbox.gac().arg("doctor").assert();
+    let report = String::from_utf8_lossy(&doctor.get_output().stdout).into_owned();
+    assert!(report.contains(&format!("fix: {hint}")), "{report}");
+    let sync = sandbox
+        .gac()
+        .args(["sync", "--session", "corp"])
+        .assert()
+        .failure();
+    let error = stderr(sync.get_output());
+    assert!(
+        error
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .contains(hint),
+        "{error}"
+    );
+    let setup = [
+        "setup",
+        "--session",
+        "corp",
+        "--start-url",
+        START_URL,
+        "--region",
+        "us-west-2",
+    ];
+    sandbox.gac().args(setup).assert().failure();
+
+    // Following the hint works.
+    sandbox.write_config("[default]\nregion = eu-west-1\n");
+    sandbox.gac().args(setup).assert().success();
+}
+
+#[test]
 fn verbose_output_never_contains_a_secret() {
     let sandbox = Sandbox::with_session();
     sandbox.mock.set_access_ttl(300);
