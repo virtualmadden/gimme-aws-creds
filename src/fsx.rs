@@ -135,6 +135,7 @@ fn apply_mode(file: &File, existing: Option<u32>, policy: ModePolicy) -> io::Res
 }
 
 #[cfg(not(unix))]
+#[allow(clippy::unnecessary_wraps)] // mirrors the fallible unix signature the caller uses
 fn apply_mode(_file: &File, _existing: Option<u32>, _policy: ModePolicy) -> io::Result<()> {
     // Windows has no POSIX modes; files inherit the user profile's ACLs, as with the AWS CLI.
     Ok(())
