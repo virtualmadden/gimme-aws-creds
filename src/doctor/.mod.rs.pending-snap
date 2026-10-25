@@ -1,3 +1,0 @@
-{"run_id":"1792947120-950017000","line":119,"new":{"module_name":"gac__doctor__tests","snapshot_name":"renders_findings_with_fixes","metadata":{"source":"src/doctor/mod.rs","assertion_line":119,"expression":"report.render()"},"snapshot":"[ok] a: fine\n[warn] b: meh\n       fix: do this\n            then that\n[FAIL] c: broken\n       fix: fix it\n\n1 ok, 1 warning, 1 failure"},"old":{"module_name":"gac__doctor__tests","metadata":{},"snapshot":"[ok] a: fine\n[warn] b: meh\n       fix: do this\n            then that\n[FAIL] c: broken\n       fix: fix it\n\n1 ok, 1 warnings, 1 failures"}}
-{"run_id":"1792947131-903927000","line":119,"new":null,"old":null}
-{"run_id":"1792947315-686064000","line":119,"new":null,"old":null}

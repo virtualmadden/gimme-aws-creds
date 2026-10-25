@@ -108,7 +108,7 @@ pub async fn run(ctx: &Context, args: StatusArgs) -> Result<()> {
 
 fn named_status(
     files: &AwsFiles,
-    store: &TokenStore,
+    store: &impl TokenStore,
     blocks: &[Block],
     name: &str,
     now: Timestamp,
@@ -147,7 +147,7 @@ fn named_status(
     }
 }
 
-fn token_status(store: &TokenStore, session: &Session, now: Timestamp) -> TokenStatus {
+fn token_status(store: &impl TokenStore, session: &Session, now: Timestamp) -> TokenStatus {
     match store.load(session.cache_key()) {
         Ok(Some(token)) => TokenStatus {
             state: match token.state(now) {

@@ -1,4 +1,4 @@
-//! `gac logout`: `sso:Logout`, then delete the cached token.
+//! `gac logout`: `sso:Logout`, then delete the cached token and the session's inventory.
 
 use crate::auth::{self, LogoutOutcome, Session};
 use crate::cli::LogoutArgs;
@@ -29,6 +29,7 @@ pub async fn run(ctx: &Context, args: LogoutArgs) -> Result<()> {
     let store = ctx.token_store();
     for session in &sessions {
         let outcome = auth::logout(&store, session).await?;
+        ctx.inventory(session).clear()?;
         let label = session.label();
         let message = match outcome {
             LogoutOutcome::Revoked => format!("Logged out of {label}."),

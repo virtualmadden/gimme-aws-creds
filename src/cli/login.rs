@@ -7,7 +7,7 @@ use jiff::Timestamp;
 use crate::auth::{self, Flow, LoginOptions};
 use crate::cli::LoginArgs;
 use crate::cli::context::Context;
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::ui;
 
 /// How long to wait for the browser sign-in, as the AWS CLI does.
@@ -22,11 +22,8 @@ pub async fn run(ctx: &Context, args: LoginArgs) -> Result<()> {
 
     let flow = if args.device_code {
         Flow::DeviceCode
-    } else if args.pkce || args.port.is_some() {
+    } else if args.pkce {
         Flow::Pkce
-    } else if session.is_legacy() {
-        ui::notice("Legacy profiles sign in with a device code, as the AWS CLI does.");
-        Flow::DeviceCode
     } else if over_ssh {
         ui::notice(
             "SSH session detected: using the device code flow. Pass --pkce to sign in with a browser on this machine.",
@@ -35,6 +32,12 @@ pub async fn run(ctx: &Context, args: LoginArgs) -> Result<()> {
     } else {
         Flow::Pkce
     };
+    if flow == Flow::DeviceCode && args.port.is_some() {
+        return Err(Error::usage(
+            "--port sets the PKCE redirect port, but this login uses the device code flow",
+        )
+        .with_hint("add --pkce to sign in with a browser on this machine, or drop --port"));
+    }
     let options = LoginOptions {
         flow,
         open_browser: !args.no_browser && (!over_ssh || flow != Flow::DeviceCode),
@@ -42,7 +45,14 @@ pub async fn run(ctx: &Context, args: LoginArgs) -> Result<()> {
         timeout: PKCE_TIMEOUT,
     };
 
-    let token = auth::login(&ctx.token_store(), &session, &options).await?;
+    let token = auth::login(
+        &ctx.token_store(),
+        &ctx.paths.sso_cache_dir(),
+        &session,
+        &options,
+    )
+    .await?;
+    ctx.inventory(&session).clear()?;
     let refresh = if token.is_refreshable(Timestamp::now()) {
         "; it refreshes automatically"
     } else {

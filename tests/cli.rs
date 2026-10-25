@@ -34,8 +34,19 @@ fn bare_command_prints_help() {
     insta::assert_snapshot!(String::from_utf8_lossy(&help.get_output().stdout));
 }
 
+/// The block `gac setup` writes for the `corp` session.
+const SETUP_BLOCK: &str = "\
+# BEGIN gac sync session=corp
+# Managed by gac: edits inside this block are replaced on the next sync.
+[sso-session corp]
+sso_start_url = https://mock-example.awsapps.com/start
+sso_region = us-west-2
+sso_registration_scopes = sso:account:access
+# END gac sync session=corp
+";
+
 #[test]
-fn setup_appends_a_session_and_never_edits_other_lines() {
+fn setup_writes_its_session_inside_a_managed_block() {
     let sandbox = Sandbox::new();
     let original = "# my settings\n[default]\nregion = eu-west-1";
     sandbox.write_config(original);
@@ -53,7 +64,8 @@ fn setup_appends_a_session_and_never_edits_other_lines() {
         .assert()
         .success()
         .stderr(predicate::str::contains("Added [sso-session corp]"));
-    assert_eq!(sandbox.config(), format!("{original}\n\n{SESSION}"));
+    let set_up = format!("{original}\n\n{SETUP_BLOCK}");
+    assert_eq!(sandbox.config(), set_up);
 
     // Running it again reuses the session and changes nothing.
     sandbox
@@ -62,14 +74,45 @@ fn setup_appends_a_session_and_never_edits_other_lines() {
         .assert()
         .success()
         .stderr(predicate::str::contains("reusing it"));
-    // Asking for different settings under the same name is refused: gac never edits it.
+    // Asking for different settings under the same name is refused.
     sandbox
         .gac()
         .args(["setup", "--session", "corp", "--region", "eu-central-1"])
         .assert()
         .code(1)
         .stderr(predicate::str::contains("already exists"));
-    assert_eq!(sandbox.config(), format!("{original}\n\n{SESSION}"));
+    assert_eq!(sandbox.config(), set_up);
+
+    // Sync fills the same block and keeps the session in it; nothing outside the block changes.
+    login_device(&sandbox);
+    sandbox
+        .gac()
+        .arg("sync")
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Synced 5 profiles"));
+    let synced = sandbox.config();
+    let block = synced
+        .strip_prefix(&format!("{original}\n\n"))
+        .unwrap_or_else(|| panic!("the user's bytes are a prefix:\n{synced}"));
+    let head = SETUP_BLOCK
+        .replacen(
+            "session=corp\n",
+            "session=corp mode=sso name={account}/{role}\n",
+            1,
+        )
+        .replace("# END gac sync session=corp\n", "");
+    assert!(block.starts_with(&format!("{head}\n[profile ")), "{block}");
+    assert!(block.ends_with("# END gac sync session=corp\n"));
+    assert!(block.contains("[profile payments-prod/ReadOnly]\nsso_session = corp\n"));
+    sandbox
+        .gac()
+        .args(["sync", "--reset"])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Already up to date"));
+    assert_eq!(sandbox.config(), synced);
+    sandbox.gac().args(["list", "--refresh"]).assert().success();
 }
 
 #[test]
@@ -189,19 +232,37 @@ fn ssh_sessions_default_to_the_device_code_flow() {
 }
 
 #[test]
+fn port_never_picks_the_flow() {
+    let sandbox = Sandbox::with_session();
+    sandbox
+        .gac()
+        .env("SSH_CONNECTION", "10.0.0.1 50000 10.0.0.2 22")
+        .args(["login", "--no-browser", "--port", "8400"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("device code flow"))
+        .stderr(predicate::str::contains("--pkce"));
+    sandbox
+        .gac()
+        .args(["login", "--device-code", "--no-browser", "--port", "8400"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("--pkce"));
+    assert_eq!(sandbox.mock.counter("register"), 0);
+    assert!(!sandbox.token_path("corp").exists());
+}
+
+#[test]
 fn legacy_profiles_log_in_with_a_start_url_key() {
     let sandbox = Sandbox::new();
     sandbox.write_config(&format!(
         "[profile old]\nsso_start_url = {START_URL}\nsso_region = us-west-2\nsso_account_id = 111122223333\nsso_role_name = ReadOnly\n"
     ));
-    sandbox
-        .gac()
-        .args(["login", "--profile", "old", "--no-browser"])
-        .assert()
-        .success()
-        .stderr(predicate::str::contains(
-            "Legacy profiles sign in with a device code",
-        ));
+    // Legacy profiles follow the same flow rules as sessions: PKCE by default.
+    let output = login_pkce(&sandbox, &["--profile", "old"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(sandbox.mock.counter("token_code"), 1);
+    assert_eq!(sandbox.mock.counter("token_device"), 0);
     let token = sandbox.token(START_URL);
     assert!(
         token.get("refreshToken").is_none(),
@@ -268,6 +329,42 @@ fn list_uses_the_inventory_cache() {
         json["accounts"][0]["roles"],
         json!(["AdministratorAccess", "ReadOnly"])
     );
+}
+
+#[test]
+fn a_login_or_logout_drops_the_previous_identitys_listing() {
+    let listed_ids = |sandbox: &Sandbox| -> Vec<String> {
+        let json = sandbox.gac().args(["list", "--json"]).assert().success();
+        let json: Value = serde_json::from_slice(&json.get_output().stdout).unwrap();
+        json["accounts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|a| a["accountId"].as_str().unwrap().to_owned())
+            .collect()
+    };
+    let sandbox = Sandbox::with_session();
+    login_device(&sandbox);
+    assert_eq!(listed_ids(&sandbox).len(), 3);
+
+    // Another identity on the same portal, after a logout.
+    sandbox.gac().arg("logout").assert().success();
+    sandbox.mock.set_accounts(vec![account(
+        "444455556666",
+        "Shared Services",
+        &["ReadOnly"],
+    )]);
+    login_device(&sandbox);
+    assert_eq!(listed_ids(&sandbox), ["444455556666"]);
+    assert_eq!(sandbox.mock.counter("accounts"), 2);
+
+    // And again by logging in over the old token, without a logout.
+    sandbox
+        .mock
+        .set_accounts(vec![account("777788889999", "sandbox", &["ReadOnly"])]);
+    login_device(&sandbox);
+    assert_eq!(listed_ids(&sandbox), ["777788889999"]);
+    assert_eq!(sandbox.mock.counter("accounts"), 3);
 }
 
 #[test]

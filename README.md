@@ -46,7 +46,7 @@ $ aws s3 ls --profile payments-prod/ReadOnly
 
 | Command | What it does |
 |---|---|
-| `gac setup` | Creates an `[sso-session]`, or reuses one `aws configure sso` already wrote |
+| `gac setup` | Creates an `[sso-session]` in the session's managed block, or reuses one `aws configure sso` already wrote |
 | `gac login` | Signs in and writes the shared token cache. `--device-code`, `--pkce`, `--no-browser`, `--port N`, `-p PROFILE` |
 | `gac logout` | Revokes the session (`sso:Logout`) and deletes its token. `--all` |
 | `gac status` | Sessions, token and registration expiry, sync blocks. No secrets. `--json` |

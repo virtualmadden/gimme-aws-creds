@@ -5,7 +5,7 @@ use std::path::Path;
 
 use jiff::Timestamp;
 
-use crate::auth::token::{TokenState, TokenStore};
+use crate::auth::token::{SsoCache, TokenState, TokenStore};
 use crate::aws_files::{AwsFiles, AwsPaths, guards, managed_block};
 use crate::doctor::Report;
 use crate::fsx;
@@ -151,7 +151,7 @@ fn check_t5(report: &mut Report, paths: &AwsPaths, files: &AwsFiles) {
 }
 
 fn check_sessions(report: &mut Report, inputs: &Inputs<'_>, files: &AwsFiles) {
-    let store = TokenStore::new(inputs.paths.sso_cache_dir());
+    let store = SsoCache::new(inputs.paths.sso_cache_dir());
     let legacy_urls: Vec<String> = files
         .legacy_sso_profiles()
         .into_iter()

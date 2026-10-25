@@ -5,7 +5,7 @@
 //! so `aws sso logout` can revoke them server-side. Reads accept anything the CLI or aws-config
 //! write. Writers take a sidecar lock, re-read, and replace the file atomically.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::Duration;
 
 use jiff::{SignedDuration, Timestamp};
@@ -90,19 +90,32 @@ impl CachedToken {
     }
 }
 
-/// The token cache directory.
+/// Where SSO tokens are kept, keyed by session name or legacy start URL (S2). v1 has one
+/// implementation, the AWS-compatible [`SsoCache`].
+pub trait TokenStore {
+    /// Held across a re-read, refresh and save so concurrent writers do not race.
+    type Lock;
+
+    fn load(&self, key: &str) -> Result<Option<CachedToken>>;
+
+    async fn lock(&self, key: &str) -> Result<Self::Lock>;
+
+    /// Stores the token. The caller holds the lock.
+    fn save(&self, key: &str, token: &CachedToken) -> Result<()>;
+
+    /// Deletes the token. Returns whether one existed.
+    fn delete(&self, key: &str) -> Result<bool>;
+}
+
+/// The plaintext token cache directory shared with the AWS CLI and SDKs.
 #[derive(Debug, Clone)]
-pub struct TokenStore {
+pub struct SsoCache {
     dir: PathBuf,
 }
 
-impl TokenStore {
+impl SsoCache {
     pub fn new(dir: PathBuf) -> Self {
         Self { dir }
-    }
-
-    pub fn dir(&self) -> &Path {
-        &self.dir
     }
 
     /// `sha1(key)` as lowercase hex: the file name the AWS CLI and SDKs look up.
@@ -118,8 +131,12 @@ impl TokenStore {
         // Not `.json`: `aws sso logout` skips files it cannot parse as JSON tokens.
         self.dir.join(format!("{}.lock", Self::file_stem(key)))
     }
+}
 
-    pub fn load(&self, key: &str) -> Result<Option<CachedToken>> {
+impl TokenStore for SsoCache {
+    type Lock = FileLock;
+
+    fn load(&self, key: &str) -> Result<Option<CachedToken>> {
         let path = self.path(key);
         let Some(bytes) = fsx::read_optional(&path)? else {
             return Ok(None);
@@ -133,13 +150,12 @@ impl TokenStore {
         })
     }
 
-    /// Takes the sidecar lock for `key`. Hold it across re-read, refresh and save.
-    pub async fn lock(&self, key: &str) -> Result<FileLock> {
+    async fn lock(&self, key: &str) -> Result<FileLock> {
         FileLock::acquire(&self.lock_path(key), LOCK_TIMEOUT).await
     }
 
-    /// Writes the token atomically with mode 0600. The caller holds the lock.
-    pub fn save(&self, key: &str, token: &CachedToken) -> Result<()> {
+    /// Writes the token atomically with mode 0600.
+    fn save(&self, key: &str, token: &CachedToken) -> Result<()> {
         fsx::ensure_private_dir(&self.dir)?;
         fsx::write_atomic(
             &self.path(key),
@@ -148,8 +164,8 @@ impl TokenStore {
         )
     }
 
-    /// Deletes the token and its lock file. Returns whether a token existed.
-    pub fn delete(&self, key: &str) -> Result<bool> {
+    /// Deletes the token and its lock file.
+    fn delete(&self, key: &str) -> Result<bool> {
         let existed = fsx::remove_if_exists(&self.path(key))?;
         // Best effort: another process may hold the lock file open (Windows refuses then).
         let _ = fsx::remove_if_exists(&self.lock_path(key));
@@ -183,7 +199,7 @@ mod tests {
     fn cache_file_names_match_the_aws_cli() {
         // Verified against AWS CLI 2.38.2: sha1("corp").
         assert_eq!(
-            TokenStore::file_stem("corp"),
+            SsoCache::file_stem("corp"),
             "ee0bfd2552fbd840c02cc48b6e823320543c450f"
         );
     }
@@ -224,7 +240,8 @@ mod tests {
     #[tokio::test]
     async fn saves_privately_and_deletes_with_the_lock_file() {
         let dir = tempfile::tempdir().unwrap();
-        let store = TokenStore::new(dir.path().join("sso/cache"));
+        let cache_dir = dir.path().join("sso/cache");
+        let store = SsoCache::new(cache_dir.clone());
         let lock = store.lock("corp").await.unwrap();
         store.save("corp", &token("2026-10-25T12:00:00Z")).unwrap();
         drop(lock);
@@ -234,6 +251,6 @@ mod tests {
         assert_eq!(fsx::mode(&store.path("corp")), Some(0o600));
         assert!(store.delete("corp").unwrap());
         assert!(store.load("corp").unwrap().is_none());
-        assert_eq!(std::fs::read_dir(store.dir()).unwrap().count(), 0);
+        assert_eq!(std::fs::read_dir(&cache_dir).unwrap().count(), 0);
     }
 }

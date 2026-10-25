@@ -18,13 +18,7 @@ pub async fn run(ctx: &Context, args: SyncArgs) -> Result<()> {
         .expect("sync resolves only named sessions")
         .clone();
     let text = files.config_text();
-    let blocks = managed_block::scan(text).map_err(|err| {
-        Error::config(format!(
-            "the gac markers in {} are broken: {err}",
-            ctx.paths.config_file().display()
-        ))
-        .with_hint("repair or delete the `# BEGIN gac` / `# END gac` lines by hand")
-    })?;
+    let blocks = ctx.blocks(&files)?;
     let existing = blocks.iter().find(|b| b.header.session == name.as_str());
 
     let settings = settings(existing, &args)?;
@@ -32,9 +26,31 @@ pub async fn run(ctx: &Context, args: SyncArgs) -> Result<()> {
     let snapshot = ctx.accounts(&session, args.refresh).await?;
     let planned = profiles::plan(&snapshot.items, &settings, &name)?;
 
-    let kept = unguarded(planned, &files, existing).await?;
+    let outside = AwsFiles::parse(
+        existing.map_or_else(
+            || text.to_owned(),
+            |block| managed_block::without(text, block),
+        ),
+        "",
+    )
+    .await?;
+    let kept = unguarded(planned, &files, &outside);
 
-    let body = profiles::render_body(&kept, &name, settings.region.as_ref());
+    // A session `gac setup` created lives in this block and stays in it.
+    let mut body = if outside.has_session(name.as_str()) {
+        Vec::new()
+    } else {
+        let mut lines = profiles::render_session(&files.sso_session(&name)?);
+        if !kept.is_empty() {
+            lines.push(String::new());
+        }
+        lines
+    };
+    body.extend(profiles::render_body(
+        &kept,
+        &name,
+        settings.region.as_ref(),
+    ));
     let block = managed_block::render(
         &settings.to_header(&name),
         &body,
@@ -107,24 +123,15 @@ fn settings(existing: Option<&Block>, args: &SyncArgs) -> Result<SyncSettings> {
 }
 
 /// Drops, with a warning, every profile whose name would create the T5 layout or shadow a
-/// profile the user (or another block) owns.
-async fn unguarded(
+/// profile the user (or another block) owns. `outside` is the config without this block.
+fn unguarded(
     planned: Vec<PlannedProfile>,
     files: &AwsFiles,
-    existing: Option<&Block>,
-) -> Result<Vec<PlannedProfile>> {
-    let text = files.config_text();
-    let outside = AwsFiles::parse(
-        existing.map_or_else(
-            || text.to_owned(),
-            |block| managed_block::without(text, block),
-        ),
-        "",
-    )
-    .await?;
+    outside: &AwsFiles,
+) -> Vec<PlannedProfile> {
     let mut kept = Vec::with_capacity(planned.len());
     for profile in planned {
-        match guards::sync_conflict(profile.name.as_str(), &outside, files) {
+        match guards::sync_conflict(profile.name.as_str(), outside, files) {
             None => kept.push(profile),
             Some(conflict) => ui::warn(format!(
                 "skipped profile `{}`: {}",
@@ -133,7 +140,7 @@ async fn unguarded(
             )),
         }
     }
-    Ok(kept)
+    kept
 }
 
 fn profile_names(block: &str) -> BTreeSet<String> {

@@ -7,6 +7,7 @@ use std::str::FromStr;
 
 use globset::{GlobBuilder, GlobSet, GlobSetBuilder};
 
+use crate::aws_files::SsoSessionConfig;
 use crate::aws_files::managed_block::Header;
 use crate::domain::{ProfileName, Region, RoleName, SessionName, is_sdk_identifier_char};
 use crate::error::{Error, Result};
@@ -289,6 +290,22 @@ pub fn plan(
         }
     }
     Ok(planned)
+}
+
+/// An `[sso-session]` section that gac owns, as `gac setup` writes it into the session's block.
+pub fn render_session(session: &SsoSessionConfig) -> Vec<String> {
+    let mut lines = vec![
+        format!("[sso-session {}]", session.name),
+        format!("sso_start_url = {}", session.start_url),
+        format!("sso_region = {}", session.region),
+    ];
+    if !session.scopes.is_empty() {
+        lines.push(format!(
+            "sso_registration_scopes = {}",
+            session.scopes.join(", ")
+        ));
+    }
+    lines
 }
 
 /// The block body: one native `sso-session` profile per planned entry.

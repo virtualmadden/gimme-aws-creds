@@ -1,10 +1,14 @@
-//! `gac setup`: create an `[sso-session]`, or reuse one that already exists.
+//! `gac setup`: create an `[sso-session]` in the session's managed block, or reuse one that
+//! already exists.
 
-use crate::aws_files::{AwsFiles, SsoSessionConfig, managed_block};
+use crate::auth::registration::DEFAULT_SCOPE;
+use crate::aws_files::managed_block::{self, Header};
+use crate::aws_files::{AwsFiles, SsoSessionConfig};
 use crate::cli::SetupArgs;
 use crate::cli::context::Context;
 use crate::domain::{Region, SessionName, StartUrl};
 use crate::error::{Error, Result};
+use crate::profiles;
 use crate::ui;
 
 pub async fn run(ctx: &Context, args: SetupArgs) -> Result<()> {
@@ -72,19 +76,34 @@ pub async fn run(ctx: &Context, args: SetupArgs) -> Result<()> {
         .with_hint("pick another name with --session, or edit the existing section by hand"));
     }
 
-    let text = files.config_text();
-    let eol = managed_block::line_ending(text);
-    let mut section = String::new();
-    for line in [
-        format!("[sso-session {name}]"),
-        format!("sso_start_url = {start_url}"),
-        format!("sso_region = {region}"),
-        "sso_registration_scopes = sso:account:access".to_owned(),
-    ] {
-        section.push_str(&line);
-        section.push_str(eol);
+    if ctx
+        .blocks(&files)?
+        .iter()
+        .any(|b| b.header.session == name.as_str())
+    {
+        return Err(Error::config(format!(
+            "a gac block for session `{name}` exists, but its [sso-session {name}] is gone"
+        ))
+        .with_hint("delete that block by hand, then run gac setup again"));
     }
-    ctx.write_config(text, &managed_block::append(text, &section))
+
+    let text = files.config_text();
+    let session = SsoSessionConfig {
+        name: name.clone(),
+        start_url,
+        region,
+        scopes: vec![DEFAULT_SCOPE.to_owned()],
+    };
+    let header = Header {
+        session: name.to_string(),
+        settings: Vec::new(),
+    };
+    let block = managed_block::render(
+        &header,
+        &profiles::render_session(&session),
+        managed_block::line_ending(text),
+    );
+    ctx.write_config(text, &managed_block::append(text, &block))
         .await?;
     ui::notice(format!(
         "Added [sso-session {name}] to {}.",

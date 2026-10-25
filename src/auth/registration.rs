@@ -4,6 +4,8 @@
 //! with `"tool": "gac"`, so gac never reads or clobbers the AWS CLI's entry. It holds no
 //! `accessToken`, so `aws sso logout` leaves it alone, as it does botocore's.
 
+use std::path::Path;
+
 use jiff::{SignedDuration, Timestamp};
 use serde::{Deserialize, Serialize};
 use sha1::{Digest, Sha1};
@@ -11,7 +13,6 @@ use sha1::{Digest, Sha1};
 use crate::auth::Session;
 use crate::auth::botocore_json::{self, timestamp};
 use crate::auth::oidc::{ClientCredentials, Oidc, RegisterRequest};
-use crate::auth::token::TokenStore;
 use crate::domain::SessionName;
 use crate::error::Result;
 use crate::fsx::{self, ModePolicy};
@@ -102,14 +103,12 @@ pub fn cache_key(session: &Session, grant: Grant) -> String {
 /// Returns a cached registration that fits, or registers a new client and caches it.
 pub async fn obtain(
     oidc: &Oidc,
-    store: &TokenStore,
+    dir: &Path,
     session: &Session,
     grant: Grant,
     now: Timestamp,
 ) -> Result<ClientCredentials> {
-    let path = store
-        .dir()
-        .join(format!("{}.json", cache_key(session, grant)));
+    let path = dir.join(format!("{}.json", cache_key(session, grant)));
     let cached = fsx::read_optional(&path)?
         .and_then(|bytes| serde_json::from_slice::<CachedRegistration>(&bytes).ok())
         .filter(|r| r.expires_at.duration_since(now) > EXPIRY_WINDOW);
@@ -153,7 +152,7 @@ pub async fn obtain(
             .map(|g| (*g).to_owned())
             .collect(),
     };
-    fsx::ensure_private_dir(store.dir())?;
+    fsx::ensure_private_dir(dir)?;
     fsx::write_atomic(
         &path,
         botocore_json::to_string(&entry).as_bytes(),

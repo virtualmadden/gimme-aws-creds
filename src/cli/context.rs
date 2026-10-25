@@ -4,8 +4,9 @@ use std::time::Duration;
 
 use jiff::{SignedDuration, Timestamp};
 
-use crate::auth::token::TokenStore;
+use crate::auth::token::SsoCache;
 use crate::auth::{self, Session};
+use crate::aws_files::managed_block::{self, Block};
 use crate::aws_files::{AwsFiles, AwsPaths};
 use crate::domain::SessionName;
 use crate::error::{Error, Result};
@@ -41,12 +42,24 @@ impl Context {
         ui::can_prompt(self.no_input)
     }
 
-    pub fn token_store(&self) -> TokenStore {
-        TokenStore::new(self.paths.sso_cache_dir())
+    pub fn token_store(&self) -> SsoCache {
+        SsoCache::new(self.paths.sso_cache_dir())
     }
 
     pub async fn files(&self) -> Result<AwsFiles> {
         AwsFiles::load(&self.paths).await
+    }
+
+    /// The managed blocks in the config file. Broken markers are an error: gac does not write
+    /// around them.
+    pub fn blocks(&self, files: &AwsFiles) -> Result<Vec<Block>> {
+        managed_block::scan(files.config_text()).map_err(|err| {
+            Error::config(format!(
+                "the gac markers in {} are broken: {err}",
+                self.paths.config_file().display()
+            ))
+            .with_hint("repair or delete the `# BEGIN gac` / `# END gac` lines by hand")
+        })
     }
 
     /// Replaces the config file's text, under gac's config lock, only if it still reads as
@@ -68,11 +81,7 @@ impl Context {
     /// The session's accounts and roles: from the inventory cache while it is fresh, otherwise
     /// (or with `refresh`) from the portal, which may refresh the SSO token first.
     pub async fn accounts(&self, session: &Session, refresh: bool) -> Result<Snapshot<Account>> {
-        let inventory = Inventory::new(
-            &self.paths.state_dir().join("inventory"),
-            session.cache_key(),
-            INVENTORY_TTL,
-        );
+        let inventory = self.inventory(session);
         let scope = format!("{} {}", session.start_url, session.region);
         let now = Timestamp::now();
         if !refresh
@@ -89,6 +98,16 @@ impl Context {
             .accounts_with_roles(&token)
             .await?;
         inventory.store(&scope, accounts, Timestamp::now())
+    }
+
+    /// The session's inventory cache. A login or logout clears it, so a listing made for one
+    /// identity is never served to the next.
+    pub fn inventory(&self, session: &Session) -> Inventory {
+        Inventory::new(
+            &self.paths.state_dir().join("inventory"),
+            session.cache_key(),
+            INVENTORY_TTL,
+        )
     }
 
     /// The session a command acts on: `--session`, else the session of `--profile`, else the

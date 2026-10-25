@@ -19,7 +19,8 @@ awsx() { HOME="$SMOKE" USERPROFILE="$SMOKE" aws "$@"; }
 3. **Device code.** `gac login --device-code`; open the printed link, check the code matches,
    approve. Expect the same success line.
 4. **List.** `gac list` prints your accounts and roles.
-5. **Sync.** `gac sync --dry-run` prints a diff adding a `# BEGIN gac sync session=smoke` block;
+5. **Sync.** `gac sync --dry-run` prints a diff adding profiles to the `# BEGIN gac sync session=smoke`
+   block that setup created;
    `gac sync` reports `Synced N profiles`. Run `gac sync` again: `Already up to date`.
 6. **AWS call.** Pick a synced profile from `grep '^\[profile' "$SMOKE/.aws/config"`, then
    `awsx sts get-caller-identity --profile '<account>/<role>'` returns your assumed-role ARN.

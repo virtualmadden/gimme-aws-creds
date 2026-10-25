@@ -8,6 +8,7 @@ mod pkce;
 pub mod registration;
 pub mod token;
 
+use std::path::Path;
 use std::time::Duration;
 
 use jiff::Timestamp;
@@ -119,9 +120,10 @@ pub struct LoginOptions {
     pub timeout: Duration,
 }
 
-/// Runs a login and writes the token where the AWS CLI and SDKs look for it.
+/// Runs a login and saves the token. Client registrations are cached in `registrations`.
 pub async fn login(
-    store: &TokenStore,
+    store: &impl TokenStore,
+    registrations: &Path,
     session: &Session,
     options: &LoginOptions,
 ) -> Result<CachedToken> {
@@ -130,7 +132,8 @@ pub async fn login(
         Flow::Pkce => Grant::AuthorizationCode,
         Flow::DeviceCode => Grant::DeviceCode,
     };
-    let client = registration::obtain(&oidc, store, session, grant_kind, Timestamp::now()).await?;
+    let client =
+        registration::obtain(&oidc, registrations, session, grant_kind, Timestamp::now()).await?;
     let grant = match options.flow {
         Flow::Pkce => pkce::login(&oidc, &client, session, options).await?,
         Flow::DeviceCode => device::login(&oidc, &client, session, options).await?,
@@ -139,10 +142,10 @@ pub async fn login(
     let _lock = store.lock(session.cache_key()).await?;
     store.save(session.cache_key(), &token)?;
     tracing::debug!(
-        path = %store.path(session.cache_key()).display(),
+        key = session.cache_key(),
         expires_at = %token.expires_at,
         refreshable = token.refresh_token.is_some(),
-        "wrote the SSO token cache"
+        "saved the SSO token"
     );
     Ok(token)
 }
@@ -177,7 +180,7 @@ fn expiry(now: Timestamp, expires_in: jiff::SignedDuration) -> Result<Timestamp>
 ///
 /// The refresh takes the sidecar lock and re-reads the cache, so parallel gac processes refresh
 /// once, and a token another process (or the AWS CLI) already rotated is used as it is.
-pub async fn access_token(store: &TokenStore, session: &Session) -> Result<SecretString> {
+pub async fn access_token(store: &impl TokenStore, session: &Session) -> Result<SecretString> {
     let key = session.cache_key();
     let token = load_token(store, session)?;
     let now = Timestamp::now();
@@ -204,7 +207,7 @@ pub async fn access_token(store: &TokenStore, session: &Session) -> Result<Secre
     }
 }
 
-fn load_token(store: &TokenStore, session: &Session) -> Result<CachedToken> {
+fn load_token(store: &impl TokenStore, session: &Session) -> Result<CachedToken> {
     store
         .load(session.cache_key())?
         .ok_or_else(|| session.login_required("no cached SSO token"))
@@ -256,7 +259,7 @@ pub enum LogoutOutcome {
 }
 
 /// Revokes the session server-side when there is a live token, then deletes the token file.
-pub async fn logout(store: &TokenStore, session: &Session) -> Result<LogoutOutcome> {
+pub async fn logout(store: &impl TokenStore, session: &Session) -> Result<LogoutOutcome> {
     let key = session.cache_key();
     let _lock = store.lock(key).await?;
     let token = store.load(key).ok().flatten();
