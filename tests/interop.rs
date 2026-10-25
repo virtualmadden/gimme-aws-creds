@@ -298,26 +298,8 @@ fn sdk_probe(sandbox: &Sandbox, profile: &str) -> Result<String, String> {
         "--nocapture",
         "--test-threads=1",
     ]);
-    cmd.env_clear();
-    for name in [
-        "PATH",
-        "SYSTEMROOT",
-        "SystemRoot",
-        "WINDIR",
-        "TEMP",
-        "TMP",
-        "TMPDIR",
-    ] {
-        if let Some(value) = std::env::var_os(name) {
-            cmd.env(name, value);
-        }
-    }
-    cmd.env("HOME", sandbox.home())
-        .env("USERPROFILE", sandbox.home())
-        .env("AWS_ENDPOINT_URL_SSO", &sandbox.mock.url)
-        .env("AWS_ENDPOINT_URL_SSO_OIDC", &sandbox.mock.url)
-        .env("AWS_EC2_METADATA_DISABLED", "true")
-        .env("GAC_SDK_PROBE_PROFILE", profile);
+    sandbox.confine(&mut cmd);
+    cmd.env("GAC_SDK_PROBE_PROFILE", profile);
     let output = cmd.output().unwrap();
     let out = stdout(&output);
     // libtest prints the marker on the line that names the test.

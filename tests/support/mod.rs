@@ -28,17 +28,18 @@ sso_region = us-west-2
 sso_registration_scopes = sso:account:access
 ";
 
-/// Variables a child process needs to run at all; everything else is cleared.
+/// Variables a child process needs to run at all; everything else is cleared. (Windows
+/// variable names are case-insensitive.)
 const PASSTHROUGH: &[&str] = &[
     "PATH",
+    "PATHEXT",
     "SYSTEMROOT",
-    "SystemRoot",
+    "SYSTEMDRIVE",
     "WINDIR",
+    "COMSPEC",
     "TEMP",
     "TMP",
     "TMPDIR",
-    "COMSPEC",
-    "PATHEXT",
 ];
 
 #[derive(Debug)]
@@ -114,7 +115,8 @@ impl Sandbox {
         std::fs::write(path, token.to_string()).unwrap();
     }
 
-    fn sandbox_env(&self, cmd: &mut Command) {
+    /// Clears `cmd`'s environment down to the sandbox HOME and the mock endpoints.
+    pub fn confine(&self, cmd: &mut Command) {
         cmd.env_clear();
         for name in PASSTHROUGH {
             if let Some(value) = std::env::var_os(name) {
@@ -133,14 +135,14 @@ impl Sandbox {
     /// A `gac` command confined to the sandbox.
     pub fn gac(&self) -> assert_cmd::Command {
         let mut cmd = Command::new(env!("CARGO_BIN_EXE_gac"));
-        self.sandbox_env(&mut cmd);
+        self.confine(&mut cmd);
         assert_cmd::Command::from_std(cmd)
     }
 
     /// A `gac` process with piped output, for flows the test has to drive.
     pub fn spawn_gac(&self, args: &[&str]) -> Child {
         let mut cmd = Command::new(env!("CARGO_BIN_EXE_gac"));
-        self.sandbox_env(&mut cmd);
+        self.confine(&mut cmd);
         cmd.args(args)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -153,7 +155,7 @@ impl Sandbox {
     pub fn aws(&self) -> Option<Command> {
         aws_cli_available().then(|| {
             let mut cmd = Command::new("aws");
-            self.sandbox_env(&mut cmd);
+            self.confine(&mut cmd);
             cmd.env("AWS_PAGER", "").env("AWS_CLI_AUTO_PROMPT", "off");
             cmd
         })

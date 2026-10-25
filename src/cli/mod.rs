@@ -18,6 +18,8 @@ use tracing_subscriber::EnvFilter;
 use crate::error::{Error, Result};
 use context::Context;
 
+const GLOBAL: &str = "Global options";
+
 /// Short-lived AWS credentials through IAM Identity Center.
 ///
 /// gac logs you in, keeps native sso-session profiles in ~/.aws/config in step with your
@@ -25,6 +27,7 @@ use context::Context;
 #[derive(Debug, Parser)]
 #[command(
     name = "gac",
+    bin_name = "gac",
     version,
     arg_required_else_help = true,
     max_term_width = 100
@@ -36,16 +39,17 @@ pub struct Cli {
         global = true,
         env = "GAC_SESSION",
         hide_env_values = true,
-        value_name = "NAME"
+        value_name = "NAME",
+        help_heading = GLOBAL
     )]
     session: Option<String>,
 
     /// Never prompt; fail with a hint instead.
-    #[arg(long, global = true)]
+    #[arg(long, global = true, help_heading = GLOBAL)]
     no_input: bool,
 
     /// Log to stderr: -v for debug, -vv for trace. Secrets are never logged.
-    #[arg(short, long, global = true, action = clap::ArgAction::Count)]
+    #[arg(short, long, global = true, action = clap::ArgAction::Count, help_heading = GLOBAL)]
     verbose: u8,
 
     #[command(subcommand)]

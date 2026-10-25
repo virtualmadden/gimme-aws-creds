@@ -88,7 +88,6 @@ impl Context {
             .await
             .accounts_with_roles(&token)
             .await?;
-        fsx::ensure_private_dir(&self.paths.state_dir())?;
         inventory.store(&scope, accounts, Timestamp::now())
     }
 

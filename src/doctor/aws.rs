@@ -27,10 +27,12 @@ pub fn run(inputs: &Inputs<'_>) -> Report {
     match &inputs.files {
         Ok(files) => {
             let files = *files;
-            report.ok(
-                "config",
-                format!("{} parses", inputs.paths.config_file().display()),
-            );
+            let config = inputs.paths.config_file();
+            if config.exists() {
+                report.ok("config", format!("{} parses", config.display()));
+            } else {
+                report.ok("config", format!("{} does not exist yet", config.display()));
+            }
             check_t5(&mut report, inputs.paths, files);
             check_sessions(&mut report, inputs, files);
             check_legacy(&mut report, files);
@@ -260,7 +262,12 @@ fn check_blocks(report: &mut Report, files: &AwsFiles) {
                 }
             }
             if !orphaned {
-                report.ok("managed-blocks", format!("{} gac block(s), all well formed", blocks.len()));
+                let summary = match blocks.len() {
+                    0 => "no gac blocks yet".to_owned(),
+                    1 => "1 gac block, well formed".to_owned(),
+                    n => format!("{n} gac blocks, all well formed"),
+                };
+                report.ok("managed-blocks", summary);
             }
         }
     }

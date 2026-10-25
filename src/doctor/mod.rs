@@ -93,12 +93,13 @@ impl Report {
             }
         }
         let count = |level| self.findings.iter().filter(|f| f.level == level).count();
+        let plural = |n: usize, word: &str| format!("{n} {word}{}", if n == 1 { "" } else { "s" });
         let _ = writeln!(
             out,
-            "\n{} ok, {} warnings, {} failures",
+            "\n{} ok, {}, {}",
             count(Level::Ok),
-            count(Level::Warn),
-            count(Level::Fail)
+            plural(count(Level::Warn), "warning"),
+            plural(count(Level::Fail), "failure")
         );
         out
     }
@@ -123,7 +124,7 @@ mod tests {
         [FAIL] c: broken
                fix: fix it
 
-        1 ok, 1 warnings, 1 failures
+        1 ok, 1 warning, 1 failure
         ");
     }
 }
