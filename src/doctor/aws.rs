@@ -217,7 +217,7 @@ fn check_sessions(report: &mut Report, inputs: &Inputs<'_>, files: &AwsFiles) {
             report.warn(
                 "sessions",
                 format!(
-                    "{} is a token keyed by the start URL of session `{name}`; sso-session profiles never read it (an older tool wrote it)",
+                    "{} is a token keyed by the start URL of session `{name}`; sso-session profiles never read it (another tool wrote it)",
                     url_keyed.display()
                 ),
                 format!("delete {}", url_keyed.display()),

@@ -1,7 +1,7 @@
 # gimme-aws-creds
 
 Short-lived AWS credentials through IAM Identity Center, as a single Rust binary that stays
-byte-compatible with the AWS CLI and SDKs. AWS only; no Okta.
+byte-compatible with the AWS CLI and SDKs. AWS only.
 
 > **Status: pre-release.** The binary and crate are called `gac`, a placeholder: the project
 > will be renamed before its first publish. The native path described below works today;
